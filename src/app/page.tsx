@@ -7,8 +7,11 @@ export default function Home() {
   const [processing, setProcessing] = useState(false);
   const [transcript, setTranscript] = useState<string>('');
   const [enhancedTranscript, setEnhancedTranscript] = useState<string>('');
+  const [geminiEnhancedTranscript, setGeminiEnhancedTranscript] = useState<string>('');
   const [enhancing, setEnhancing] = useState(false);
+  const [geminiEnhancing, setGeminiEnhancing] = useState(false);
   const [enhancementProgress, setEnhancementProgress] = useState({ completed: 0, total: 0 });
+  const [geminiEnhancementProgress, setGeminiEnhancementProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string>('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,8 +45,9 @@ export default function Home() {
       const result = await response.json();
       setTranscript(result.transcript);
       
-      // Auto-trigger enhancement
+      // Auto-trigger both enhancements
       enhanceTranscriptInternal(result.transcript);
+      enhanceWithGeminiInternal(result.transcript, file);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -82,6 +86,40 @@ export default function Home() {
   const enhanceTranscript = async () => {
     if (!transcript) return;
     await enhanceTranscriptInternal(transcript);
+  };
+
+  const enhanceWithGeminiInternal = async (transcriptText: string, audioFile: File) => {
+    setGeminiEnhancing(true);
+    setError('');
+    setGeminiEnhancementProgress({ completed: 0, total: 0 });
+
+    try {
+      const formData = new FormData();
+      formData.append('transcript', transcriptText);
+      formData.append('audioFile', audioFile);
+
+      const response = await fetch('/api/enhance-gemini', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to enhance transcript with Gemini');
+      }
+
+      const result = await response.json();
+      setGeminiEnhancedTranscript(result.enhanced_transcript);
+      setGeminiEnhancementProgress({ completed: result.chunks_processed, total: result.chunks_processed });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gemini enhancement failed');
+    } finally {
+      setGeminiEnhancing(false);
+    }
+  };
+
+  const enhanceWithGemini = async () => {
+    if (!transcript || !file) return;
+    await enhanceWithGeminiInternal(transcript, file);
   };
 
   const downloadMarkdown = (content: string, filename: string) => {
@@ -182,9 +220,21 @@ export default function Home() {
                   >
                     {enhancing ? (
                       enhancementProgress.total > 0 
-                        ? `Enhancing (${enhancementProgress.completed}/${enhancementProgress.total})...`
-                        : 'Enhancing...'
+                        ? `Claude (${enhancementProgress.completed}/${enhancementProgress.total})...`
+                        : 'Claude Enhancing...'
                     ) : 'Re-enhance with Claude'}
+                  </button>
+                  <button
+                    onClick={enhanceWithGemini}
+                    disabled={geminiEnhancing || !file}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium 
+                      py-2 px-4 rounded-md transition-colors text-sm disabled:cursor-not-allowed"
+                  >
+                    {geminiEnhancing ? (
+                      geminiEnhancementProgress.total > 0 
+                        ? `Gemini (${geminiEnhancementProgress.completed}/${geminiEnhancementProgress.total})...`
+                        : 'Gemini Enhancing...'
+                    ) : 'Re-enhance with Gemini'}
                   </button>
                   <button
                     onClick={() => downloadMarkdown(transcript, 'transcript-original.md')}
@@ -213,54 +263,99 @@ export default function Home() {
           />
         </div>
 
-        {/* Enhanced Transcript Section */}
-        {(enhancedTranscript || enhancing) && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Enhanced Transcript
-              </h2>
-              {enhancedTranscript && (
-                <button
-                  onClick={() => downloadMarkdown(enhancedTranscript, 'transcript-enhanced.md')}
-                  className="bg-green-600 hover:bg-green-700 text-white font-medium 
-                    py-2 px-4 rounded-md transition-colors text-sm"
-                >
-                  Download
-                </button>
-              )}
-            </div>
-            
-            {enhancing && enhancementProgress.total > 0 && (
-              <div className="mb-4">
-                <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
-                  <span>Enhancement Progress</span>
-                  <span>{Math.round((enhancementProgress.completed / enhancementProgress.total) * 100)}%</span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-purple-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${(enhancementProgress.completed / enhancementProgress.total) * 100}%` }}
-                  ></div>
-                </div>
-              </div>
+        {/* Claude Enhanced Transcript Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              Claude Enhanced Transcript
+            </h2>
+            {enhancedTranscript && (
+              <button
+                onClick={() => downloadMarkdown(enhancedTranscript, 'transcript-claude-enhanced.md')}
+                className="bg-green-600 hover:bg-green-700 text-white font-medium 
+                  py-2 px-4 rounded-md transition-colors text-sm"
+              >
+                Download
+              </button>
             )}
-            
-            <textarea
-              value={enhancedTranscript}
-              readOnly
-              onKeyDown={handleSelectAll}
-              placeholder={enhancing ? 'Enhancing transcript with Claude...' : 'Enhanced transcript will appear here'}
-              className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 
-                rounded-md resize-y font-mono text-sm
-                bg-white dark:bg-gray-900
-                text-gray-900 dark:text-gray-100
-                placeholder-gray-500 dark:placeholder-gray-400
-                focus:ring-2 focus:ring-blue-500 focus:border-blue-500
-                dark:focus:ring-blue-400 dark:focus:border-blue-400"
-            />
           </div>
-        )}
+          
+          {enhancing && enhancementProgress.total > 0 && (
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+                <span>Claude Enhancement Progress</span>
+                <span>{Math.round((enhancementProgress.completed / enhancementProgress.total) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div 
+                  className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(enhancementProgress.completed / enhancementProgress.total) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+          
+          <textarea
+            value={enhancedTranscript}
+            readOnly
+            onKeyDown={handleSelectAll}
+            placeholder={enhancing ? 'Enhancing transcript with Claude...' : 'Claude enhanced transcript will appear here'}
+            className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 
+              rounded-md resize-y font-mono text-sm
+              bg-white dark:bg-gray-900
+              text-gray-900 dark:text-gray-100
+              placeholder-gray-500 dark:placeholder-gray-400
+              focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+              dark:focus:ring-blue-400 dark:focus:border-blue-400"
+          />
+        </div>
+
+        {/* Gemini Enhanced Transcript Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              Gemini Enhanced Transcript (with Audio)
+            </h2>
+            {geminiEnhancedTranscript && (
+              <button
+                onClick={() => downloadMarkdown(geminiEnhancedTranscript, 'transcript-gemini-enhanced.md')}
+                className="bg-green-600 hover:bg-green-700 text-white font-medium 
+                  py-2 px-4 rounded-md transition-colors text-sm"
+              >
+                Download
+              </button>
+            )}
+          </div>
+          
+          {geminiEnhancing && geminiEnhancementProgress.total > 0 && (
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+                <span>Gemini Enhancement Progress</span>
+                <span>{Math.round((geminiEnhancementProgress.completed / geminiEnhancementProgress.total) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(geminiEnhancementProgress.completed / geminiEnhancementProgress.total) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+          
+          <textarea
+            value={geminiEnhancedTranscript}
+            readOnly
+            onKeyDown={handleSelectAll}
+            placeholder={geminiEnhancing ? 'Enhancing transcript with Gemini (including audio analysis)...' : 'Gemini enhanced transcript will appear here'}
+            className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 
+              rounded-md resize-y font-mono text-sm
+              bg-white dark:bg-gray-900
+              text-gray-900 dark:text-gray-100
+              placeholder-gray-500 dark:placeholder-gray-400
+              focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+              dark:focus:ring-blue-400 dark:focus:border-blue-400"
+          />
+        </div>
       </div>
     </div>
   );

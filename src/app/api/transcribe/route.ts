@@ -35,7 +35,7 @@ function formatTranscriptToMarkdown(utterances: AssemblyAIResponse['utterances']
       currentSpeaker = utterance.speaker;
       const timestamp = formatTimestamp(utterance.start);
       const speakerLabel = utterance.speaker.replace('speaker_', 'Speaker ').toUpperCase();
-      markdown += `\n**${speakerLabel}** *${timestamp}*\n\n`;
+      markdown += `\n${speakerLabel} ${timestamp}\n\n`;
     }
     markdown += utterance.text + '\n\n';
   }
