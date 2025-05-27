@@ -6,6 +6,9 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
   const [transcript, setTranscript] = useState<string>('');
+  const [enhancedTranscript, setEnhancedTranscript] = useState<string>('');
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhancementProgress, setEnhancementProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string>('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,6 +41,9 @@ export default function Home() {
 
       const result = await response.json();
       setTranscript(result.transcript);
+      
+      // Auto-trigger enhancement
+      enhanceTranscriptInternal(result.transcript);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -45,14 +51,47 @@ export default function Home() {
     }
   };
 
-  const downloadMarkdown = () => {
+  const enhanceTranscriptInternal = async (transcriptText: string) => {
+    setEnhancing(true);
+    setError('');
+    setEnhancementProgress({ completed: 0, total: 0 });
+
+    try {
+      const response = await fetch('/api/enhance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transcript: transcriptText }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to enhance transcript');
+      }
+
+      const result = await response.json();
+      setEnhancedTranscript(result.enhanced_transcript);
+      setEnhancementProgress({ completed: result.chunks_processed, total: result.chunks_processed });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Enhancement failed');
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
+  const enhanceTranscript = async () => {
     if (!transcript) return;
+    await enhanceTranscriptInternal(transcript);
+  };
+
+  const downloadMarkdown = (content: string, filename: string) => {
+    if (!content) return;
     
-    const blob = new Blob([transcript], { type: 'text/markdown' });
+    const blob = new Blob([content], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'transcript.md';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -126,21 +165,37 @@ export default function Home() {
           </div>
         )}
 
-        {/* Results Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
+        {/* Original Transcript Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Transcript
+              Original Transcript
             </h2>
-            {transcript && (
-              <button
-                onClick={downloadMarkdown}
-                className="bg-green-600 hover:bg-green-700 text-white font-medium 
-                  py-2 px-4 rounded-md transition-colors text-sm"
-              >
-                Download
-              </button>
-            )}
+            <div className="flex gap-2">
+              {transcript && (
+                <>
+                  <button
+                    onClick={enhanceTranscript}
+                    disabled={enhancing}
+                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-medium 
+                      py-2 px-4 rounded-md transition-colors text-sm disabled:cursor-not-allowed"
+                  >
+                    {enhancing ? (
+                      enhancementProgress.total > 0 
+                        ? `Enhancing (${enhancementProgress.completed}/${enhancementProgress.total})...`
+                        : 'Enhancing...'
+                    ) : 'Re-enhance with Claude'}
+                  </button>
+                  <button
+                    onClick={() => downloadMarkdown(transcript, 'transcript-original.md')}
+                    className="bg-green-600 hover:bg-green-700 text-white font-medium 
+                      py-2 px-4 rounded-md transition-colors text-sm"
+                  >
+                    Download
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           
           <textarea
@@ -157,6 +212,55 @@ export default function Home() {
               dark:focus:ring-blue-400 dark:focus:border-blue-400"
           />
         </div>
+
+        {/* Enhanced Transcript Section */}
+        {(enhancedTranscript || enhancing) && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Enhanced Transcript
+              </h2>
+              {enhancedTranscript && (
+                <button
+                  onClick={() => downloadMarkdown(enhancedTranscript, 'transcript-enhanced.md')}
+                  className="bg-green-600 hover:bg-green-700 text-white font-medium 
+                    py-2 px-4 rounded-md transition-colors text-sm"
+                >
+                  Download
+                </button>
+              )}
+            </div>
+            
+            {enhancing && enhancementProgress.total > 0 && (
+              <div className="mb-4">
+                <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  <span>Enhancement Progress</span>
+                  <span>{Math.round((enhancementProgress.completed / enhancementProgress.total) * 100)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div 
+                    className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${(enhancementProgress.completed / enhancementProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+            
+            <textarea
+              value={enhancedTranscript}
+              readOnly
+              onKeyDown={handleSelectAll}
+              placeholder={enhancing ? 'Enhancing transcript with Claude...' : 'Enhanced transcript will appear here'}
+              className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 
+                rounded-md resize-y font-mono text-sm
+                bg-white dark:bg-gray-900
+                text-gray-900 dark:text-gray-100
+                placeholder-gray-500 dark:placeholder-gray-400
+                focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+                dark:focus:ring-blue-400 dark:focus:border-blue-400"
+            />
+          </div>
+        )}
       </div>
     </div>
   );
