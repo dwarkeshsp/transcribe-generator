@@ -175,35 +175,67 @@ export async function POST(request: NextRequest) {
     // Create chunks based on token limits
     const chunks = createChunks(segments, 2000);
     
-    // Enhance each chunk sequentially to avoid rate limits
-    const enhancedChunks: string[] = [];
-    
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const formattedChunk = formatChunkForClaude(chunk);
-      
-      try {
-        const enhanced = await enhanceChunkWithClaude(formattedChunk);
-        enhancedChunks.push(enhanced);
-      } catch (error) {
-        console.error(`Error enhancing chunk ${i + 1}:`, error);
-        // Fallback to original chunk if enhancement fails
-        enhancedChunks.push(formattedChunk);
+    // Create a readable stream for SSE
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        
+        // Send initial progress
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'progress',
+          completed: 0,
+          total: chunks.length,
+          message: 'Starting Claude enhancement...'
+        })}\n\n`));
+        
+        const enhancedChunks: string[] = [];
+        
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const formattedChunk = formatChunkForClaude(chunk);
+          
+          try {
+            // Send progress update
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'progress',
+              completed: i,
+              total: chunks.length,
+              message: `Processing chunk ${i + 1}/${chunks.length} with Claude...`
+            })}\n\n`));
+            
+            const enhanced = await enhanceChunkWithClaude(formattedChunk);
+            enhancedChunks.push(enhanced);
+          } catch (error) {
+            console.error(`Error enhancing chunk ${i + 1}:`, error);
+            // Fallback to original chunk if enhancement fails
+            enhancedChunks.push(formattedChunk);
+          }
+          
+          // Add delay between requests to respect API rate limits
+          if (i < chunks.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+        
+        // Send final result
+        const enhancedTranscript = enhancedChunks.join('\n\n');
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'complete',
+          enhanced_transcript: enhancedTranscript,
+          chunks_processed: chunks.length,
+          total_segments: segments.length
+        })}\n\n`));
+        
+        controller.close();
       }
-      
-      // Add delay between requests to respect API rate limits
-      if (i < chunks.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+    });
     
-    // Combine enhanced chunks
-    const enhancedTranscript = enhancedChunks.join('\n\n');
-    
-    return NextResponse.json({
-      enhanced_transcript: enhancedTranscript,
-      chunks_processed: chunks.length,
-      total_segments: segments.length
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
     
   } catch (error) {

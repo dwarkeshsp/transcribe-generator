@@ -15,7 +15,7 @@ CRITICAL REQUIREMENTS:
 
 2. REMOVE ONLY VERBAL ARTIFACTS:
 - Remove ALL filler words (um, uh, ah, like when used as filler, you know, etc.)
-- Remove ALL conversational artifacts (yeah, so, I mean, well, right, etc.) when they're just verbal tics
+- Remove ALL conversational artifacts (yeah, so, I mean, well, right, I think, etc.) when they're just verbal tics
 - Remove false starts and incomplete thoughts that get corrected
 - Remove stutters and repeated words/phrases
 - Remove meaningless interjections and throat clearing sounds
