@@ -30,19 +30,47 @@ export default function Home() {
     setTranscript('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/transcribe', {
+      // Step 1: Get API key from our backend
+      const keyResponse = await fetch('/api/upload-url', {
         method: 'POST',
-        body: formData,
       });
 
-      if (!response.ok) {
+      if (!keyResponse.ok) {
+        throw new Error('Failed to get API key');
+      }
+
+      const { api_key } = await keyResponse.json();
+
+      // Step 2: Upload file directly to AssemblyAI
+      const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
+        method: 'POST',
+        headers: {
+          'authorization': api_key,
+        },
+        body: file,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload audio file');
+      }
+
+      const uploadResult = await uploadResponse.json();
+      const fileUrl = uploadResult.upload_url;
+
+      // Step 3: Start transcription with the uploaded file URL
+      const transcribeResponse = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ upload_url: fileUrl }),
+      });
+
+      if (!transcribeResponse.ok) {
         throw new Error('Failed to transcribe audio');
       }
 
-      const result = await response.json();
+      const result = await transcribeResponse.json();
       setTranscript(result.transcript);
       
       // Auto-trigger both enhancements
