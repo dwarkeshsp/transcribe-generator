@@ -54,16 +54,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { upload_url } = await request.json();
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
 
-    if (!upload_url) {
+    if (!file) {
       return NextResponse.json(
-        { error: 'No upload URL provided' },
+        { error: 'No file provided' },
         { status: 400 }
       );
     }
 
-    // Step 1: Start transcription using the uploaded file URL
+    // Step 1: Upload file to AssemblyAI
+    const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
+      method: 'POST',
+      headers: {
+        'authorization': apiKey,
+      },
+      body: file,
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status}`);
+    }
+
+    const { upload_url } = await uploadResponse.json();
+
+    // Step 2: Start transcription
     const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
       method: 'POST',
       headers: {
@@ -87,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     const { id } = await transcriptResponse.json();
 
-    // Step 2: Poll for completion
+    // Step 3: Poll for completion
     let result: AssemblyAIResponse;
     let attempts = 0;
     const maxAttempts = 60; // 10 minutes max
