@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { parseMarkdownTranscript, createChunks, formatChunkForClaude } from './lib/chunking';
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
@@ -13,6 +14,8 @@ export default function Home() {
   const [enhancementProgress, setEnhancementProgress] = useState({ completed: 0, total: 0 });
   const [geminiEnhancementProgress, setGeminiEnhancementProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string>('');
+  const [audioUrl, setAudioUrl] = useState<string>('');
+  const [audioMimeType, setAudioMimeType] = useState<string>('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -57,6 +60,10 @@ export default function Home() {
       const uploadResult = await uploadResponse.json();
       const fileUrl = uploadResult.upload_url;
 
+      // Store audio URL and MIME type for Gemini enhancement
+      setAudioUrl(fileUrl);
+      setAudioMimeType(file.type || 'audio/mpeg');
+
       // Step 3: Start transcription with the uploaded file URL
       const transcribeResponse = await fetch('/api/transcribe', {
         method: 'POST',
@@ -75,7 +82,7 @@ export default function Home() {
       
       // Auto-trigger both enhancements
       enhanceTranscriptInternal(result.transcript);
-      enhanceWithGeminiInternal(result.transcript, file);
+      enhanceWithGeminiInternal(result.transcript, fileUrl, file.type || 'audio/mpeg');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -89,52 +96,58 @@ export default function Home() {
     setEnhancementProgress({ completed: 0, total: 0 });
 
     try {
-      const response = await fetch('/api/enhance', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ transcript: transcriptText }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to enhance transcript');
+      // Parse the markdown transcript into segments
+      const segments = parseMarkdownTranscript(transcriptText);
+      
+      if (segments.length === 0) {
+        throw new Error('Could not parse transcript segments');
       }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No response stream available');
-      }
-
-      while (true) {
-        const { done, value } = await reader.read();
+      
+      // Create chunks based on token limits
+      const chunks = createChunks(segments, 2000);
+      setEnhancementProgress({ completed: 0, total: chunks.length });
+      
+      // Enhance each chunk individually
+      const enhancedChunks: string[] = [];
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const formattedChunk = formatChunkForClaude(chunk);
         
-        if (done) break;
-        
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              if (data.type === 'progress') {
-                setEnhancementProgress({ completed: data.completed, total: data.total });
-              } else if (data.type === 'complete') {
-                setEnhancedTranscript(data.enhanced_transcript);
-                setEnhancementProgress({ completed: data.chunks_processed, total: data.chunks_processed });
-              } else if (data.type === 'error') {
-                throw new Error(data.error);
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse SSE data:', parseError);
-            }
+        try {
+          setEnhancementProgress({ completed: i, total: chunks.length });
+          
+          const response = await fetch('/api/enhance-chunk', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ chunk: formattedChunk }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to enhance chunk ${i + 1}`);
           }
+          
+          const result = await response.json();
+          enhancedChunks.push(result.enhanced_chunk);
+        } catch (error) {
+          console.error(`Error enhancing chunk ${i + 1}:`, error);
+          // Fallback to original chunk if enhancement fails
+          enhancedChunks.push(formattedChunk);
+        }
+        
+        // Add delay between requests to respect API rate limits
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
+      
+      // Combine enhanced chunks
+      const enhancedTranscript = enhancedChunks.join('\n\n');
+      setEnhancedTranscript(enhancedTranscript);
+      setEnhancementProgress({ completed: chunks.length, total: chunks.length });
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Enhancement failed');
     } finally {
@@ -147,19 +160,22 @@ export default function Home() {
     await enhanceTranscriptInternal(transcript);
   };
 
-  const enhanceWithGeminiInternal = async (transcriptText: string, audioFile: File) => {
+  const enhanceWithGeminiInternal = async (transcriptText: string, audioFileUrl: string, mimeType: string) => {
     setGeminiEnhancing(true);
     setError('');
     setGeminiEnhancementProgress({ completed: 0, total: 0 });
 
     try {
-      const formData = new FormData();
-      formData.append('transcript', transcriptText);
-      formData.append('audioFile', audioFile);
-
       const response = await fetch('/api/enhance-gemini', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transcript: transcriptText,
+          audioUrl: audioFileUrl,
+          mimeType: mimeType,
+        }),
       });
 
       if (!response.ok) {
@@ -208,8 +224,8 @@ export default function Home() {
   };
 
   const enhanceWithGemini = async () => {
-    if (!transcript || !file) return;
-    await enhanceWithGeminiInternal(transcript, file);
+    if (!transcript || !audioUrl) return;
+    await enhanceWithGeminiInternal(transcript, audioUrl, audioMimeType);
   };
 
   const downloadMarkdown = (content: string, filename: string) => {
@@ -316,7 +332,7 @@ export default function Home() {
                   </button>
                   <button
                     onClick={enhanceWithGemini}
-                    disabled={geminiEnhancing || !file}
+                    disabled={geminiEnhancing || !audioUrl}
                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium 
                       py-2 px-4 rounded-md transition-colors text-sm disabled:cursor-not-allowed"
                   >
