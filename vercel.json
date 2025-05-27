@@ -1,16 +1,13 @@
 {
   "functions": {
     "src/app/api/transcribe/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 600
     },
     "src/app/api/enhance/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 600
     },
     "src/app/api/enhance-gemini/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 600
     }
-  },
-  "limits": {
-    "duration": 300000
   }
 }
