@@ -138,40 +138,9 @@ export default function Home() {
         throw new Error('Failed to enhance transcript with Gemini');
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No response stream available');
-      }
-
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) break;
-        
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              if (data.type === 'progress') {
-                setGeminiEnhancementProgress({ completed: data.completed, total: data.total });
-              } else if (data.type === 'complete') {
-                setGeminiEnhancedTranscript(data.enhanced_transcript);
-                setGeminiEnhancementProgress({ completed: data.chunks_processed, total: data.chunks_processed });
-              } else if (data.type === 'error') {
-                throw new Error(data.error);
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse SSE data:', parseError);
-            }
-          }
-        }
-      }
+      const result = await response.json();
+      setGeminiEnhancedTranscript(result.enhanced_transcript);
+      setGeminiEnhancementProgress({ completed: result.chunks_processed, total: result.chunks_processed });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gemini enhancement failed');
     } finally {
