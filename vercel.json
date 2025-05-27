@@ -3,5 +3,8 @@
     "app/api/*/route.ts": {
       "maxDuration": 600
     }
+  },
+  "github": {
+    "silent": false
   }
 }
