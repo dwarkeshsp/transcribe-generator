@@ -1,104 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-interface WordSegment {
+interface AssemblyAIResponse {
+  id: string;
+  status: 'queued' | 'processing' | 'completed' | 'error';
   text: string;
-  start: number;
-  end: number;
-  type: 'word' | 'spacing' | 'audio_event';
-  speaker_id: string;
+  utterances?: Array<{
+    confidence: number;
+    start: number;
+    end: number;
+    text: string;
+    speaker: string;
+  }>;
+  error?: string;
 }
 
-interface TranscriptionResponse {
-  language_code: string;
-  language_probability: number;
-  text: string;
-  words: WordSegment[];
-}
-
-function formatTimestamp(seconds: number): string {
+function formatTimestamp(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1000);
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
+  const secs = seconds % 60;
   return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-function filterCrosstalk(words: WordSegment[]): WordSegment[] {
-  const crosstalkPhrases = new Set([
-    'mm', 'mm-hmm', 'mmm', 'mm.', 'mm-hmm.',
-    'yeah', 'yes', 'yep', 'yup',
-    'uh', 'um', 'umm', 'uh-huh',
-    'hmm', 'hm', 'hmm.',
-    'oh', 'ah', 'ahh',
-    'okay', 'ok', 'right',
-    'sure', 'exactly', 'absolutely',
-    'mhm', 'mhmm', 'aha'
-  ]);
-
-  return words.filter(word => {
-    if (word.type !== 'word') return true;
-    
-    const cleanText = word.text.toLowerCase().replace(/[.,!?]/g, '').trim();
-    
-    // Filter out crosstalk phrases
-    if (crosstalkPhrases.has(cleanText)) return false;
-    
-    // Filter out very short utterances (under 1 second)
-    const duration = word.end - word.start;
-    if (duration < 1 && cleanText.length <= 3) return false;
-    
-    // Filter out single characters
-    if (cleanText.length <= 1) return false;
-    
-    return true;
-  });
-}
-
-function formatTranscriptToMarkdown(words: WordSegment[]): string {
-  const filteredWords = filterCrosstalk(words);
-  
-  if (filteredWords.length === 0) {
-    return 'No valid transcript content found after filtering.';
+function formatTranscriptToMarkdown(utterances: AssemblyAIResponse['utterances']): string {
+  if (!utterances || utterances.length === 0) {
+    return 'No transcript available.';
   }
 
   let markdown = '';
   let currentSpeaker = '';
-  let currentSpeakerNumber = 0;
-  const speakerMap = new Map<string, number>();
-  let utteranceBuffer: string[] = [];
-  let lastTimestamp = 0;
 
-  filteredWords.forEach((word, index) => {
-    if (word.type === 'word') {
-      // Check if speaker has changed
-      if (word.speaker_id !== currentSpeaker) {
-        // Flush any previous utterance
-        if (utteranceBuffer.length > 0 && currentSpeaker) {
-          markdown += utteranceBuffer.join('') + '\n\n';
-          utteranceBuffer = [];
-        }
-
-        // Handle new speaker
-        currentSpeaker = word.speaker_id;
-        if (!speakerMap.has(currentSpeaker)) {
-          currentSpeakerNumber++;
-          speakerMap.set(currentSpeaker, currentSpeakerNumber);
-        }
-
-        const speakerNum = speakerMap.get(currentSpeaker);
-        const timestamp = formatTimestamp(word.start);
-        markdown += `Speaker ${speakerNum} *${timestamp}*\n\n`;
-        lastTimestamp = word.start;
-      }
-
-      utteranceBuffer.push(word.text);
-    } else if (word.type === 'spacing') {
-      utteranceBuffer.push(word.text);
+  for (const utterance of utterances) {
+    if (utterance.speaker !== currentSpeaker) {
+      currentSpeaker = utterance.speaker;
+      const timestamp = formatTimestamp(utterance.start);
+      const speakerLabel = utterance.speaker.replace('speaker_', 'Speaker ').toUpperCase();
+      markdown += `\n**${speakerLabel}** *${timestamp}*\n\n`;
     }
-  });
-
-  // Flush final utterance
-  if (utteranceBuffer.length > 0) {
-    markdown += utteranceBuffer.join('') + '\n\n';
+    markdown += utterance.text + '\n\n';
   }
 
   return markdown.trim();
@@ -106,11 +45,11 @@ function formatTranscriptToMarkdown(words: WordSegment[]): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.ELEVEN_LABS_API_KEY;
+    const apiKey = process.env.ASSEMBLY_AI_API_KEY;
     
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'ElevenLabs API key not configured' },
+        { error: 'AssemblyAI API key not configured' },
         { status: 500 }
       );
     }
@@ -125,52 +64,87 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check file size (1GB limit from ElevenLabs docs)
-    if (file.size > 1024 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'File size exceeds 1GB limit' },
-        { status: 400 }
-      );
-    }
-
-    // Prepare form data for ElevenLabs API
-    const elevenLabsFormData = new FormData();
-    elevenLabsFormData.append('file', file);
-    elevenLabsFormData.append('model_id', 'scribe_v1');
-
-    // Call ElevenLabs Speech-to-Text API
-    const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+    // Step 1: Upload file to AssemblyAI
+    const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
-        'xi-api-key': apiKey,
+        'authorization': apiKey,
       },
-      body: elevenLabsFormData,
+      body: file,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('ElevenLabs API error:', errorText);
-      return NextResponse.json(
-        { error: `ElevenLabs API error: ${response.status}` },
-        { status: response.status }
-      );
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status}`);
     }
 
-    const transcriptionData: TranscriptionResponse = await response.json();
-    
+    const { upload_url } = await uploadResponse.json();
+
+    // Step 2: Start transcription
+    const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
+      method: 'POST',
+      headers: {
+        'authorization': apiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        audio_url: upload_url,
+        speaker_labels: true,
+        auto_highlights: false,
+        disfluencies: false,
+        filter_profanity: false,
+        format_text: true,
+        punctuate: true,
+      }),
+    });
+
+    if (!transcriptResponse.ok) {
+      throw new Error(`Transcription request failed: ${transcriptResponse.status}`);
+    }
+
+    const { id } = await transcriptResponse.json();
+
+    // Step 3: Poll for completion
+    let result: AssemblyAIResponse;
+    let attempts = 0;
+    const maxAttempts = 60; // 10 minutes max
+
+    do {
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+      
+      const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${id}`, {
+        headers: {
+          'authorization': apiKey,
+        },
+      });
+
+      if (!pollResponse.ok) {
+        throw new Error(`Polling failed: ${pollResponse.status}`);
+      }
+
+      result = await pollResponse.json();
+      attempts++;
+
+      if (attempts >= maxAttempts) {
+        throw new Error('Transcription timeout');
+      }
+    } while (result.status === 'queued' || result.status === 'processing');
+
+    if (result.status === 'error') {
+      throw new Error(result.error || 'Transcription failed');
+    }
+
     // Format the response to markdown
-    const markdownTranscript = formatTranscriptToMarkdown(transcriptionData.words);
+    const markdownTranscript = formatTranscriptToMarkdown(result.utterances);
 
     return NextResponse.json({
       transcript: markdownTranscript,
-      language: transcriptionData.language_code,
-      confidence: transcriptionData.language_probability,
+      raw_text: result.text,
     });
 
   } catch (error) {
     console.error('Transcription error:', error);
     return NextResponse.json(
-      { error: 'Internal server error during transcription' },
+      { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }
     );
   }

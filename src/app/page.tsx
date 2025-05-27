@@ -4,33 +4,24 @@ import { useState } from 'react';
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [transcript, setTranscript] = useState<string>('');
-  const [geminiTranscript, setGeminiTranscript] = useState<string>('');
   const [error, setError] = useState<string>('');
 
-  const handleFileUpload = (uploadedFile: File) => {
-    setFile(uploadedFile);
-    setError('');
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) {
-      handleFileUpload(droppedFile);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      setFile(selectedFile);
+      setError('');
     }
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
   };
 
   const processFile = async () => {
     if (!file) return;
 
-    setUploading(true);
+    setProcessing(true);
     setError('');
+    setTranscript('');
 
     try {
       const formData = new FormData();
@@ -50,130 +41,121 @@ export default function Home() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
-      setUploading(false);
+      setProcessing(false);
     }
   };
 
-  const downloadMarkdown = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'text/markdown' });
+  const downloadMarkdown = () => {
+    if (!transcript) return;
+    
+    const blob = new Blob([transcript], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    a.download = 'transcript.md';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
+  const handleSelectAll = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      textarea.select();
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 text-center mb-8">
-          AI Transcript Generator
-        </h1>
-
-        {/* File Upload Section */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Upload Audio/Video File</h2>
-          
-          <div
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors"
-          >
-            {file ? (
-              <div className="text-green-600">
-                <p className="font-medium">{file.name}</p>
-                <p className="text-sm text-gray-500">
-                  {(file.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-              </div>
-            ) : (
-              <div>
-                <p className="text-gray-600 mb-2">
-                  Drag and drop your audio/video file here, or
-                </p>
-                <input
-                  type="file"
-                  accept="audio/*,video/*"
-                  onChange={(e) => {
-                    const selectedFile = e.target.files?.[0];
-                    if (selectedFile) handleFileUpload(selectedFile);
-                  }}
-                  className="hidden"
-                  id="file-input"
-                />
-                <label
-                  htmlFor="file-input"
-                  className="bg-blue-500 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-600 transition-colors"
-                >
-                  Choose File
-                </label>
-              </div>
-            )}
-          </div>
-
-          {file && (
-            <button
-              onClick={processFile}
-              disabled={uploading}
-              className="w-full mt-4 bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600 disabled:bg-gray-400 transition-colors"
-            >
-              {uploading ? 'Processing...' : 'Generate Transcript'}
-            </button>
-          )}
-
-          {error && (
-            <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
-              {error}
-            </div>
-          )}
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="container mx-auto max-w-4xl px-6 py-12">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+            Transcript Generator
+          </h1>
+          <p className="text-lg text-gray-600 dark:text-gray-300">
+            Upload audio or video files to generate speaker-labeled transcripts
+          </p>
         </div>
 
-        {/* Results Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* ElevenLabs Transcript */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">ElevenLabs Transcript</h2>
-              {transcript && (
-                <button
-                  onClick={() => downloadMarkdown(transcript, 'elevenlabs-transcript.md')}
-                  className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition-colors"
-                >
-                  Download
-                </button>
-              )}
-            </div>
-            
-            {transcript ? (
-              <div className="bg-gray-50 p-4 rounded border max-h-96 overflow-y-auto">
-                <pre className="whitespace-pre-wrap text-sm">{transcript}</pre>
-              </div>
-            ) : (
-              <div className="bg-gray-50 p-4 rounded border text-gray-500 text-center">
-                Upload and process a file to see the transcript
-              </div>
+        {/* Upload Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+              Select audio or video file
+            </label>
+            <input
+              type="file"
+              accept="audio/*,video/*"
+              onChange={handleFileChange}
+              className="block w-full text-sm text-gray-500 dark:text-gray-400
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-md file:border-0
+                file:text-sm file:font-medium
+                file:bg-blue-50 file:text-blue-700
+                dark:file:bg-blue-900/20 dark:file:text-blue-400
+                hover:file:bg-blue-100 dark:hover:file:bg-blue-900/30
+                file:cursor-pointer cursor-pointer"
+            />
+            {file && (
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                Selected: {file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)
+              </p>
             )}
           </div>
 
-          {/* Gemini Enhanced Transcript (Future Feature) */}
-          <div className="bg-white rounded-lg shadow-md p-6 opacity-50">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Gemini Enhanced Transcript</h2>
+          <button
+            onClick={processFile}
+            disabled={!file || processing}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 
+              text-white font-medium py-3 px-6 rounded-md transition-colors
+              disabled:cursor-not-allowed"
+          >
+            {processing ? 'Processing...' : 'Generate Transcript'}
+          </button>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 
+            text-red-800 dark:text-red-400 px-4 py-3 rounded-md mb-8">
+            <p className="font-medium">Error:</p>
+            <p>{error}</p>
+          </div>
+        )}
+
+        {/* Results Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              Transcript
+            </h2>
+            {transcript && (
               <button
-                disabled
-                className="bg-gray-400 text-white px-3 py-1 rounded text-sm cursor-not-allowed"
+                onClick={downloadMarkdown}
+                className="bg-green-600 hover:bg-green-700 text-white font-medium 
+                  py-2 px-4 rounded-md transition-colors text-sm"
               >
                 Download
               </button>
-            </div>
-            
-            <div className="bg-gray-50 p-4 rounded border text-gray-500 text-center">
-              Coming soon - AI-enhanced transcript with error correction
-            </div>
+            )}
           </div>
+          
+          <textarea
+            value={transcript}
+            readOnly
+            onKeyDown={handleSelectAll}
+            placeholder={processing ? 'Processing transcript...' : 'Transcript will appear here after processing'}
+            className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 
+              rounded-md resize-y font-mono text-sm
+              bg-white dark:bg-gray-900
+              text-gray-900 dark:text-gray-100
+              placeholder-gray-500 dark:placeholder-gray-400
+              focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+              dark:focus:ring-blue-400 dark:focus:border-blue-400"
+          />
         </div>
       </div>
     </div>
