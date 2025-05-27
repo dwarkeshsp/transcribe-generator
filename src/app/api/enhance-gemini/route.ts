@@ -121,23 +121,20 @@ function formatChunkForGemini(chunk: Chunk): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { transcript, audioUrl, mimeType } = await request.json();
+    const formData = await request.formData();
+    const transcript = formData.get('transcript') as string;
+    const audioFile = formData.get('audioFile') as File;
     
-    if (!transcript || !audioUrl) {
+    if (!transcript || !audioFile) {
       return NextResponse.json(
-        { error: 'Both transcript and audio URL are required' },
+        { error: 'Both transcript and audio file are required' },
         { status: 400 }
       );
     }
     
-    // Download audio file from URL
-    const audioResponse = await fetch(audioUrl);
-    if (!audioResponse.ok) {
-      throw new Error('Failed to download audio file');
-    }
-    
-    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-    const finalMimeType = mimeType || 'audio/mpeg';
+    // Convert audio file to buffer
+    const audioBuffer = Buffer.from(await audioFile.arrayBuffer());
+    const mimeType = audioFile.type || 'audio/mpeg';
     
     // Parse the markdown transcript into segments
     const segments = parseMarkdownTranscript(transcript);
@@ -185,10 +182,10 @@ export async function POST(request: NextRequest) {
           if (audioSizeMB < 20) {
             base64Audio = audioBuffer.toString('base64');
           } else {
-            const audioBlob = new Blob([audioBuffer], { type: finalMimeType });
+            const audioBlob = new Blob([audioBuffer], { type: mimeType });
             uploadedFile = await ai.files.upload({
               file: audioBlob,
-              config: { mimeType: finalMimeType },
+              config: { mimeType: mimeType },
             });
           }
           
@@ -222,7 +219,7 @@ ${formattedChunk}`;
                   { text: fullPrompt },
                   {
                     inlineData: {
-                      mimeType: finalMimeType,
+                      mimeType: mimeType,
                       data: base64Audio!,
                     }
                   }
