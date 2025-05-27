@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
     // Prepare form data for ElevenLabs API
     const elevenLabsFormData = new FormData();
     elevenLabsFormData.append('file', file);
-    elevenLabsFormData.append('model', 'scribe-v1');
+    elevenLabsFormData.append('model_id', 'scribe_v1');
 
     // Call ElevenLabs Speech-to-Text API
     const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
