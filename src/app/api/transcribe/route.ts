@@ -94,6 +94,7 @@ export async function POST(request: NextRequest) {
         filter_profanity: false,
         format_text: true,
         punctuate: true,
+        speech_models: ['slam-1']
       }),
     });
 
